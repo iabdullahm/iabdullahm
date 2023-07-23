@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.9;
+
+
+import "@openzeppelin/contracts@4.9.2/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts@4.9.2/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts@4.9.2/token/ERC20/extensions/ERC20Snapshot.sol";
+import "@openzeppelin/contracts@4.9.2/access/Ownable.sol";
+import "@openzeppelin/contracts@4.9.2/security/Pausable.sol";
+import "@openzeppelin/contracts@4.9.2/token/ERC20/extensions/draft-ERC20Permit.sol";
+import "@openzeppelin/contracts@4.9.2/token/ERC20/extensions/ERC20Votes.sol";
+import "@openzeppelin/contracts@4.9.2/token/ERC20/extensions/ERC20FlashMint.sol";
+
+contract ItihadBSC is ERC20, ERC20Burnable, ERC20Snapshot, Ownable, Pausable, ERC20Permit, ERC20Votes, ERC20FlashMint {
+    uint256 public constant BUY_TAX = 3; // 3% buying tax
+    uint256 public constant SELL_TAX = 5; // 5% selling tax
+    uint256 public constant TRANSFER_TAX = 3; // 3% transfer tax
+    uint256 public constant LIQUIDITY_TAX = 2; // 2% liquidity tax
+
+    address public liquidityPool;
+
+    constructor() ERC20("ItihadBSC", "ITI") ERC20Permit("ItihadBSC") {
+        _mint(msg.sender, 100000000 * 10 ** decimals());
+        renounceOwnership(); // Add this line to renounce ownership
+
+        liquidityPool = 0x5d95fF76E03AFC89a7c3c7B4Cd3837EEe4F1A20A; // Set the liquidity pool address
+    }
+
+    function snapshot() public onlyOwner {
+        _snapshot();
+    }
+
+    function buy(uint256 amount) public payable {
+        uint256 liquidityAmount = (amount * BUY_TAX) / 100; // Calculate the liquidity amount
+
+        // Ensure the sent BNB is sufficient
+        uint256 netAmount = amount + liquidityAmount;
+        require(msg.value >= netAmount, "Insufficient BNB sent");
+
+        // Transfer the received tokens from the buyer to the contract
+        _transfer(msg.sender, address(this), amount);
+
+        // Mint the corresponding amount of tokens to the buyer's address
+        _mint(msg.sender, amount - liquidityAmount);
+
+        // Add the liquidity amount to the liquidity pool
+        (bool success, ) = liquidityPool.call{ value: liquidityAmount }("");
+        require(success, "Failed to add liquidity to the pool");
+    }
+
+    function sell(uint256 amount) public {
+        uint256 liquidityAmount = (amount * SELL_TAX) / 100; // Calculate the selling tax amount
+        uint256 burnAmount = (amount * TRANSFER_TAX) / 100; // Calculate the transfer tax amount
+
+        address blockedAddress = 0xDa80090B6bD5aA3a553E44FE98AC3c45009fbDF6; // Address to block from selling
+        require(msg.sender != blockedAddress, "Selling is not allowed for this address");
+
+        // Transfer the sold tokens from the seller to the contract
+        _transfer(msg.sender, address(this), amount);
+
+        // Burn the corresponding amount of tokens from the seller's address
+        _burn(msg.sender, amount - liquidityAmount - burnAmount);
+
+        // Remove the liquidity amount from the liquidity pool
+        _transfer(address(this), liquidityPool, liquidityAmount);
+
+        // Burn the transfer tax amount
+        _burn(address(this), burnAmount);
+    }
+
+    function pause() public onlyOwner {
+        _pause();
+    }
+
+    function unpause() public onlyOwner {
+        _unpause();
+    }
+
+    function mint(address to, uint256 amount) public onlyOwner {
+        _mint(to, amount);
+    }
+
+    function _beforeTokenTransfer(address from, address to, uint256 amount)
+        internal
+        whenNotPaused
+        override(ERC20, ERC20Snapshot)
+    {
+        super._beforeTokenTransfer(from, to, amount);
+    }
+
+    // The following functions are overrides required by Solidity.
+
+    function _afterTokenTransfer(address from, address to, uint256 amount)
+        internal
+        override(ERC20, ERC20Votes)
+    {
+        super._afterTokenTransfer(from, to, amount);
+    }
+
+    function _mint(address to, uint256 amount)
+        internal
+        override(ERC20, ERC20Votes)
+    {
+        super._mint(to, amount);
+    }
+
+    function _burn(address account, uint256 amount)
+        internal
+        override(ERC20, ERC20Votes)
+    {
+        super._burn(account, amount);
+    }
+}
